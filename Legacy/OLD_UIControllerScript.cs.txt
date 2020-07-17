@@ -1,0 +1,863 @@
+﻿//updated: 11-23-19
+//version: .04
+//Author: William Jones
+/*
+ * Draws the UI and manages it
+ */
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+using UnityStandardAssets.Characters.FirstPerson;
+using UnityStandardAssets.CrossPlatformInput;
+public class OLD_UIControllerScript : MonoBehaviour
+{
+    //The sprite to draw for each inventory slot
+    public Image inventorySlotSprite;
+    //The flower placement controller
+    public GameObject placementController;
+
+    //The sprites for selected and unselected
+    public Sprite selectedImage;
+    public Sprite notSelectedImage;
+
+    //The ui flower prefab
+    public GameObject uiFlowerPrefab;
+    //How much to scale the flower
+    private float uiFlowerScale = 1.7f;
+
+    //The text prefab
+    public GameObject uiTextPrefab;
+
+    //These will be gotten from the FlowerPlayerControler
+    int inventorySize = 0;
+    int selectedSlot = 0;
+
+    //This is a list of objects for the inventory and their count
+    public List<GameObject> inventoryModels = new List<GameObject>();
+    public List<Placeable> inventoryData = new List<Placeable>();
+    public List<int> inventoryCount = new List<int>();
+
+    //The flower properties game object
+    private FlowerProperties flowerProperties;
+
+    //The instance of the objectives and quests
+    private GameObject questPanelInstance;
+    private GameObject challengeFlowerPanel;
+    private GameObject tabObject;
+    private GameObject showoffFlower;
+    private Text objectiveText;
+    private Text helpText;
+
+    //The flower viewing variables
+    private GameObject flowerToView;
+    private GameObject viewBackgroundInstance;
+    public bool isViewingFlower = false;
+    private float flowerRotationSensitivity = 6;
+    private float viewFlowerScale = 6;
+    private float viewTransition = 0;
+    private float viewTransitionTo = 0;
+    private float viewTransitionSpeed; //Set when the slot flower is found and !null
+    private bool onSameSlot = true;
+    public GameObject cursorSprite;
+
+    //Variables for slot flashing
+    bool slotIsFlashing = false;
+    Color slotColor = Color.white;
+    float slotFlashSpeed = 5f;
+
+    //Variables for pausing the game
+    public bool isPaused = false;
+    GameObject pauseMenuPanel;
+    GameObject helpPanelInstance;
+    GameObject controlsPanelInstance;
+    GameObject buttonsPanelInstance;
+    FirstPersonController fpsController;
+
+    private void Start()
+    {
+        //Find relevant instances
+        pauseMenuPanel = GameObject.Find("pauseMenuPanel");
+        helpPanelInstance = pauseMenuPanel.transform.Find("helpPanel").gameObject;
+        controlsPanelInstance = pauseMenuPanel.transform.Find("controlsPanel").gameObject;
+        buttonsPanelInstance = pauseMenuPanel.transform.Find("buttonsPanel").gameObject;
+        pauseMenuPanel.SetActive(isPaused);
+        questPanelInstance = GameObject.Find("objectivesPopup");
+        challengeFlowerPanel = questPanelInstance.transform.Find("challengeFlowerPanel").gameObject;
+        challengeFlowerPanel.SetActive(false);
+        viewBackgroundInstance = GameObject.Find("flowerViewerBackground");
+        fpsController = GameObject.Find("FPSController").GetComponent<FirstPersonController>();
+
+        //Setting quest object instance variables
+        objectiveText = questPanelInstance.transform.GetChild(0).gameObject.GetComponent<Text>();
+        helpText = questPanelInstance.transform.GetChild(1).gameObject.GetComponent<Text>();
+        tabObject = questPanelInstance.transform.GetChild(2).gameObject;
+        setCurrentQuestId(0);
+
+        flowerProperties = GameObject.Find("World").GetComponent<FlowerProperties>();
+        //Create the UI with properties
+        inventorySize = placementController.GetComponent<FlowerPlayerControler>().inventorySize;
+        for (int ii = 0; ii < inventorySize; ii += 1)
+        {
+            inventoryModels.Add(null);
+            inventoryData.Add(null);
+            inventoryCount.Add(0);
+        }
+
+        selectedSlot = placementController.GetComponent<FlowerPlayerControler>().selectedIndex;
+        drawInventorySlots(inventorySize);
+        updateSelectedSlot(selectedSlot);
+    }
+
+    private void Update()
+    {
+        updateQuestPanel();
+        updateSlotFlashing();
+        updateFlowerViewer();
+        updatePauseMenu();
+    }
+
+    private void updateFlowerViewer()
+    {
+        if (Input.GetKey(KeyCode.LeftControl) && onSameSlot && !isPaused)
+        {
+            //If there's not currently a flower being viewed
+            if (flowerToView == null)
+            {
+                //Set the flowerToView to the uiFlower at the slot
+                flowerToView = getFlowerAtSlot(selectedSlot);
+
+                //If there is a flower in the slot do first time stuff
+                if (flowerToView != null)
+                {
+                    //Get a reference to the flower control script
+                    UIFlowerScript script = flowerToView.GetComponent<UIFlowerScript>();
+
+                    //A variable for the transitioning between viewing and not viewing
+                    viewTransitionTo = 1;
+
+                    viewTransitionSpeed = script.viewingSpeed;
+
+                    //The UI is now viewing a flower
+                    isViewingFlower = true;
+
+                    //Tell the flower that it is the chosen one
+                    script.isViewing = true;
+
+                    //Tell the flower that it not done being viewed
+                    script.isDoneViewing = false;
+
+                    //Tell the flower where to go and what to scale to
+                    Vector3 slotPos = flowerToView.transform.parent.localPosition;
+
+                    //Tell the flower where to go and what to scale to
+                    float yOff = GetComponent<RectTransform>().rect.height * .5f;
+                    script.goToLocation = new Vector3(-slotPos.x, yOff - slotPos.y, 0);
+                    script.goToScale = new Vector3(100 * viewFlowerScale, 100 * viewFlowerScale, 100 * viewFlowerScale);
+                }
+            }
+
+            //Do continuous viewing stuff
+            if (flowerToView != null)
+            {
+                //Rotate the flower
+                flowerToView.transform.Rotate(-Camera.main.transform.up, CrossPlatformInputManager.GetAxis("Mouse X") * flowerRotationSensitivity, Space.World);
+                flowerToView.transform.Rotate(Camera.main.transform.right, CrossPlatformInputManager.GetAxis("Mouse Y") * flowerRotationSensitivity, Space.World);
+            }
+        }
+        else //If the player lets go of control or switches slot
+        {
+            onSameSlot = true;
+            //When the player first lets go of control
+            if (flowerToView != null)
+            {
+                viewTransitionTo = 0;
+
+                //Get the attached script
+                UIFlowerScript script = flowerToView.GetComponent<UIFlowerScript>();
+
+                //Tell the flower we're done viewing
+                //DO NOT TELL THE FLOWER THAT isViewing=false! It will do that itself when it's back to the right place
+                script.isDoneViewing = true;
+
+                //Tell the flower to return to the original location, scale, and rotation
+                script.goToLocation = Vector3.zero;
+                script.goToScale = script.returnScale;
+                script.goToRotation = Quaternion.identity;
+
+                //We're done telling the flower what to do now
+                flowerToView = null;
+
+                //The UI is no longer viewing a flower
+                isViewingFlower = false;
+            }
+
+        }
+
+        //Manage the view transitioning
+        viewTransition = Mathf.Lerp(viewTransition, viewTransitionTo, Time.deltaTime * viewTransitionSpeed);
+
+        //Manage the background
+        float bfo = .6f;
+        float beo = 0f;
+        viewBackgroundInstance.GetComponent<MeshRenderer>().material.color = new Color(0, 0, 0, Mathf.Lerp(beo, bfo, viewTransition));
+        cursorSprite.GetComponent<SpriteRenderer>().color = new Color(1, 1, 1, Mathf.Lerp(1, 0, viewTransition));
+    }
+
+    /// <summary>
+    /// Create the game objects that will be drawn for the slots
+    /// </summary>
+    /// <param name="slotCount"></param>
+    public void drawInventorySlots(int slotCount)
+    {
+        //Set the local variable
+        inventorySize = slotCount;
+
+        //The panel that holds the slot images
+        RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+
+        //Instantiate them
+        int ii = 0;
+        while (ii < slotCount)
+        {
+            //The currently instantiated slot image
+            Image currentSlotImage = Instantiate(inventorySlotSprite, layoutPanel);
+            currentSlotImage.gameObject.layer = LayerMask.NameToLayer("UI");
+
+            //Add the slot ui flower object
+            GameObject slotFlower = Instantiate(uiFlowerPrefab, currentSlotImage.transform);
+            slotFlower.layer = LayerMask.NameToLayer("UI");
+            slotFlower.transform.localScale = Vector3.one * uiFlowerScale;
+
+            //Add the flower counter text box
+            GameObject textObject = Instantiate(uiTextPrefab, currentSlotImage.transform);
+            textObject.transform.SetAsLastSibling();
+            textObject.GetComponent<Text>().color = Color.clear;
+
+            ii += 1;
+        }
+    }
+
+    /// <summary>
+    /// Updates the inventory flashing variables
+    /// </summary>
+    private void updateSlotFlashing()
+    {
+        if (slotIsFlashing)
+        {
+            slotColor = Color.Lerp(slotColor, Color.white, Time.deltaTime * slotFlashSpeed);
+
+            //The panel that holds the slot images
+            RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+
+            //Adjust the color for all slots
+            for (int ii = 0; ii < layoutPanel.childCount; ii += 1)
+            {
+                layoutPanel.transform.GetChild(ii).gameObject.GetComponent<Image>().color = slotColor;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flashes the inventory slots
+    /// </summary>
+    public void flashInventorySlots()
+    {
+        slotIsFlashing = true;
+        slotColor = Color.red;
+        Debug.Log("Inventory slots flashing");
+    }
+
+    /// <summary>
+    /// Changes which slot is selected
+    /// </summary>
+    public void updateSelectedSlot(int inputSlot)
+    {
+        //Tell the viewer to switch slots if it's a different slot
+        if (inputSlot != selectedSlot)
+        {
+            onSameSlot = false;
+        }
+
+        //Set the local variable
+        selectedSlot = inputSlot;
+
+        //The panel that holds the slot images
+        RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+
+        //Loop through all the inventory slots
+        int ii = 0;
+        while (ii < inventorySize)
+        {
+            Image currentSlotImage = layoutPanel.GetChild(ii).gameObject.GetComponent<Image>();
+            if (ii == inputSlot)
+            {
+                currentSlotImage.sprite = selectedImage;
+                currentSlotImage.gameObject.transform.GetChild(0).gameObject.GetComponent<UIFlowerScript>().popup();
+
+                Text slotText = currentSlotImage.gameObject.transform.GetChild(1).gameObject.GetComponent<Text>();
+                Color currentTextColor = slotText.color;
+                slotText.color = new Color(0, 0, 0, currentTextColor.a);
+
+            }
+            else
+            {
+                currentSlotImage.sprite = notSelectedImage;
+                currentSlotImage.gameObject.transform.GetChild(0).gameObject.GetComponent<UIFlowerScript>().popdown();
+
+                Text slotText = currentSlotImage.gameObject.transform.GetChild(1).gameObject.GetComponent<Text>();
+                Color currentTextColor = slotText.color;
+                slotText.color = new Color(1, 1, 1, currentTextColor.a);
+            }
+            ii += 1;
+        }
+
+        //If the player is attempting the challenge flower
+        if (currentQuestId >= 18)
+        {
+            compareSelectedSlot();
+        }
+    }
+
+    /// <summary>
+    /// Tells the slot to update itself and refresh the flower model and labels
+    /// </summary>
+    /// <param name="slot"></param>
+    public void updateSlot(int slot)
+    {
+        //The panel that holds the slot images
+        RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+        //Find the slot image and clear it out
+        Image currentSlotImage = layoutPanel.GetChild(slot).GetComponent<Image>();
+
+        if (inventoryCount[slot] == 1)
+        {
+            addFlowerToSlot(slot, currentSlotImage.transform);
+        }
+        else if (inventoryCount[slot] == 0)
+        {
+            //Clear the slot flower
+            GameObject slotFlower = currentSlotImage.transform.GetChild(0).gameObject;
+            slotFlower.GetComponent<UIFlowerScript>().hideFlower();
+        }
+        updateText(slot, currentSlotImage);
+
+        if (currentQuestId >= 18)
+        {
+            compareSelectedSlot();
+        }
+    }
+
+    void updateText(int slot, Image currentSlotImage)
+    {
+        //Set the slot text
+        Text slotText = currentSlotImage.gameObject.transform.GetChild(1).gameObject.GetComponent<Text>();
+        slotText.text = inventoryCount[slot].ToString();
+        Color currentTextColor = slotText.color;
+        slotText.color = new Color(currentTextColor.r, currentTextColor.g, currentTextColor.b, 1);
+    }
+
+    /// <summary>
+    /// Compares the challenge flower attributes to the selected slot
+    /// </summary>
+    public void compareSelectedSlot()
+    {
+        Transform attributesTransform = challengeFlowerPanel.transform.GetChild(0);
+        //If there's a flower in the slot
+        if (getSlotFlowerCount(selectedSlot) > 0)
+        {
+            //Get the index and the flower part indexes
+            uint inIndex = getSlotFlowerIndex(selectedSlot);
+            int pistilIndex = flowerProperties.getPistilIndexFromIndex(inIndex);
+            int pistilColor = flowerProperties.getPistilColorIndexFromIndex(inIndex);
+            int petalIndex = flowerProperties.getPetalIndexFromIndex(inIndex);
+            int petalColor = flowerProperties.getPetalColorIndexFromIndex(inIndex);
+            int leafIndex = flowerProperties.getLeafIndexFromIndex(inIndex);
+            int leafColor = flowerProperties.getLeafColorIndexFromIndex(inIndex);
+            int stemIndex = flowerProperties.getStemIndexFromIndex(inIndex);
+            int stemColor = flowerProperties.getStemColorIndexFromIndex(inIndex);
+
+            //Tell each one to compare
+            attributesTransform.GetChild(0).gameObject.GetComponent<ChallengeCheckerSlotController>().compareIndex(pistilIndex, pistilColor);
+            attributesTransform.GetChild(1).gameObject.GetComponent<ChallengeCheckerSlotController>().compareIndex(petalIndex, petalColor);
+            attributesTransform.GetChild(2).gameObject.GetComponent<ChallengeCheckerSlotController>().compareIndex(leafIndex, leafColor);
+            attributesTransform.GetChild(3).gameObject.GetComponent<ChallengeCheckerSlotController>().compareIndex(stemIndex, stemColor);
+        }
+        else
+        {
+            //Tell each one not to compare
+            attributesTransform.GetChild(0).gameObject.GetComponent<ChallengeCheckerSlotController>().doNotCompareIndex();
+            attributesTransform.GetChild(1).gameObject.GetComponent<ChallengeCheckerSlotController>().doNotCompareIndex();
+            attributesTransform.GetChild(2).gameObject.GetComponent<ChallengeCheckerSlotController>().doNotCompareIndex();
+            attributesTransform.GetChild(3).gameObject.GetComponent<ChallengeCheckerSlotController>().doNotCompareIndex();
+        }
+    }
+
+    /// <summary>
+    /// Adds the given flower to the slot
+    /// </summary>
+    /// <param name="slot"></param>
+    /// <param name="flowerIndex"></param>
+    private void addFlowerToSlot(int slot, uint flowerIndex)
+    {
+        /*//The panel that holds the slot images
+        RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+        //Find the slot image and clear it out
+        Image currentSlotImage = layoutPanel.GetChild(slot).GetComponent<Image>();
+        currentSlotImage.gameObject.layer = LayerMask.NameToLayer("UI");
+        //Add the flower to the slot
+        addFlowerToSlot(currentSlotImage.transform, flowerIndex);*/
+    }
+
+    /// <summary>
+    /// Adds the given flower to the slot (via transform)
+    /// </summary>
+    /// <param name="slotTransform"></param>
+    /// <param name="flowerIndex"></param>
+    private void addFlowerToSlot(int slot, Transform slotTransform)
+    {
+        inventoryModels[slot].transform.SetParent(slotTransform);
+        inventoryModels[slot].transform.localPosition = Vector3.zero;
+        /*
+        //Add the flower and then build it
+        GameObject slotFlower = slotTransform.GetChild(0).gameObject;
+        slotFlower.layer = LayerMask.NameToLayer("UI");
+
+        int pistilIndex = flowerProperties.getPistilIndexFromIndex(flowerIndex);
+        int leafIndex = flowerProperties.getLeafIndexFromIndex(flowerIndex);
+        int petalIndex = flowerProperties.getPetalIndexFromIndex(flowerIndex);
+        int stemIndex = flowerProperties.getStemIndexFromIndex(flowerIndex);
+
+        //print("pistil: " + pistilIndex + " leaf: " + leafIndex + " petal: " + petalIndex + " stem: " + stemIndex);
+        slotFlower.GetComponent<UIFlowerScript>().buildFlower(stemIndex, leafIndex, petalIndex, pistilIndex);
+
+        int pistilColorIndex = flowerProperties.getPistilColorIndexFromIndex(flowerIndex);
+        int leafColorIndex = flowerProperties.getLeafColorIndexFromIndex(flowerIndex);
+        int petalColorIndex = flowerProperties.getPetalColorIndexFromIndex(flowerIndex);
+        int stemColorIndex = flowerProperties.getStemColorIndexFromIndex(flowerIndex);
+        slotFlower.GetComponent<UIFlowerScript>().colorFlower(stemColorIndex, leafColorIndex, petalColorIndex, pistilColorIndex);*/
+    }
+
+    /// <summary>
+    /// Change the slot's flower index and count
+    /// </summary>
+    /// <param name="slot"></param>
+    /// <param name="index"></param>
+    /// <param name="count"></param>
+    public void setSlotIndex(int slot, long index, int count)
+    {
+        /*inventoryIndex[slot] = index;
+        inventoryCount[slot] = count;
+        updateSlot(slot);*/
+    }
+
+    /// <summary>
+    /// Sets the slot index
+    /// </summary>
+    /// <param name="slot"></param>
+    /// <param name="index"></param>
+    /// <param name="count"></param>
+    public void setSlotIndex(int slot, uint index, int count)
+    {
+        /*inventoryIndex[slot] = (long)index;
+        inventoryCount[slot] = count;
+        updateSlot(slot);*/
+    }
+
+    /// <summary>
+    /// Gets the index of the flower at the slot
+    /// </summary>
+    /// <param name="slot"></param>
+    public uint getSlotFlowerIndex(int slot)
+    {
+        return inventoryData[slot].id;
+    }
+
+    /// <summary>
+    /// Gets the number of flowers in a slot
+    /// </summary>
+    /// <param name="slot"></param>
+    public int getSlotFlowerCount(int slot)
+    {
+        return inventoryCount[slot];
+    }
+
+    /// <summary>
+    /// Sets the slot's count (how many there are)
+    /// </summary>
+    /// <param name="slot"></param>
+    /// <param name="count"></param>
+    public void setSlotCount(int slot, int count)
+    {
+        inventoryCount[slot] = count;
+        updateSlot(slot);
+    }
+
+    /// <summary>
+    /// Returns the flower object if there is one
+    /// </summary>
+    /// <param name="slot"></param>
+    /// <returns></returns>
+    public GameObject getFlowerAtSlot(int slot)
+    {
+        //The panel that holds the slot images
+        RectTransform layoutPanel = transform.GetChild(0).GetComponent<RectTransform>();
+        //Find the flower
+        GameObject slotFlower = layoutPanel.GetChild(slot).GetChild(0).gameObject;
+
+        //If there's not a flower then return null
+        if (slotFlower == null)
+        {
+            return null;
+        }
+        else
+        {
+            if (slotFlower.transform.childCount > 0)
+            {
+                return slotFlower;
+            }
+            else
+            {
+                return null;
+            }
+        }
+    }
+
+
+    public void setSlot(int slot, GameObject model, Placeable data, int count)
+    {
+        inventoryModels[slot] = model;
+        inventoryData[slot] = data;
+        inventoryCount[slot] = count;
+        updateSlot(slot);
+    }
+
+    public int getCountAtSlot(int slot, int count)
+    {
+        return inventoryCount[slot];
+    }
+
+    public void setCountAtSlot(int slot, int count)
+    {
+        inventoryCount[slot] = count;
+        updateSlot(slot);
+    }
+
+    public GameObject getModelAtSlot(int slot, GameObject model)
+    {
+        return inventoryModels[slot];
+    }
+
+    public Placeable getInventoryData(int slot)
+    {
+        return inventoryData[slot];
+    }
+
+    public void incInventoryCount(int slot)
+    {
+        inventoryCount[slot]++;
+        print("updating");
+        updateSlot(slot);
+    }
+
+
+
+    #region Pause Menu
+    /// <summary>
+    /// This region is for handling the pause menu
+    /// </summary>
+    private void updatePauseMenu()
+    {
+        //If escape is paused
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            isPaused = !isPaused;
+            pauseMenuPanel.SetActive(isPaused);
+            cursorSprite.SetActive(!isPaused);
+            fpsController.setCursorLocked(!isPaused);
+            questPanelInstance.SetActive(!isPaused);
+            hidePanels();
+        }
+    }
+
+    //Closes the pause menu and resumes the game
+    public void resumeGame()
+    {
+        isPaused = false;
+        pauseMenuPanel.SetActive(isPaused);
+        cursorSprite.SetActive(!isPaused);
+        fpsController.setCursorLocked(!isPaused);
+        questPanelInstance.SetActive(!isPaused);
+        hidePanels();
+    }
+
+    //Returns to the title screen
+    public void quitGame()
+    {
+        //Quit
+        SceneManager.UnloadSceneAsync(SceneManager.GetSceneByName(SceneManager.GetActiveScene().name));
+        SceneManager.LoadSceneAsync("Resources/Scenes/titleScene");
+    }
+
+    //Shows a panel showing the controls
+    public void showControls()
+    {
+        //Controls
+        controlsPanelInstance.SetActive(true);
+        buttonsPanelInstance.SetActive(false);
+    }
+
+    //Shows a panel showing the help
+    public void showHelp()
+    {
+        //Help
+        helpPanelInstance.SetActive(true);
+        buttonsPanelInstance.SetActive(false);
+    }
+
+    //Closes the help and controls panel
+    public void hidePanels()
+    {
+        controlsPanelInstance.SetActive(false);
+        helpPanelInstance.SetActive(false);
+        buttonsPanelInstance.SetActive(true);
+    }
+
+    #endregion
+
+    #region QuestStuff
+
+    /// <summary>
+    /// This region is for the quest/objective system
+    /// </summary>
+
+    bool showQuestPanel = false;
+    float questPanelToPosition = 0;
+    float questPanelHidePosition = 700f;
+    float questPanelShowPosition = 1;
+    float questPanelPosition = 700;
+    float questPanelSpeed = 3f;
+
+    /// <summary>
+    /// Updates and performs changes to the quest panel
+    /// </summary>
+    void updateQuestPanel()
+    {
+        //Update the position
+        questPanelPosition = Mathf.Lerp(questPanelPosition, questPanelToPosition, questPanelSpeed * Time.deltaTime);
+        questPanelInstance.GetComponent<RectTransform>().anchoredPosition = new Vector3(questPanelPosition, 0, 0);
+
+        //Tell the panel to move to either position depending on whether or not it should be hidden
+        if (showQuestPanel)
+        {
+            questPanelToPosition = questPanelShowPosition;
+        }
+        else
+        {
+            questPanelToPosition = questPanelHidePosition;
+        }
+
+        //Toggle the panel's visibility when the user presses "tab"
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            //Hide the tab text
+            tabObject.SetActive(false);
+
+            //Toggle the quest panel
+            showQuestPanel = !showQuestPanel;
+        }
+
+        //Use numpad enter to go through quest objectives
+        if (Input.GetKeyDown(KeyCode.KeypadEnter))
+        {
+            completeQuest();
+        }
+    }
+
+    //Serialized
+    public string objectivePrefix;
+    public string helpPrefix;
+
+    string[] questString = {
+        "Clear flowers to create an empty 4x4 area",
+        "Find and collect 2 flowers with the same petal type",
+        "Place the 2 flowers in the clearing to breed them together",
+        "Wait for a child flower to grow in the empty space and collect it",
+        "Congratulations! Press 'Enter' to continue the objectives",
+        "Clear flowers to create an empty 8X8 area",
+        "Collect a flower that has a black stem",
+        "Collect a flower that has black petals",
+        "Collect a flower that has black leafs",
+        "Collect a flower that has a black pistil",
+        "Find a large clearing and plant the 4 flowers so they will breed children",
+        "Breed a flower that is entirely black",
+        "Congratulations! Press 'Enter' to continue the objectives",
+        "Collect a flower that has a curly spring stem",
+        "Collect a flower that has mushroom type leaves",
+        "Breed an all black flower with a curly spring stem and collect it",
+        "Breed an all black flower to have both the curly spring stem and mushroom type leaves and collect it",
+        "Congratulations! Press 'Enter' to exit the tutorial and start challenge mode"
+    };
+
+    string[] helpQuestString = {
+        "Collect flowers in your inventory and delete them with the 'Q' key",
+        "Each flower has a petal type and a petal color. The petals are usually attached to the end of the stem",
+        "If two or more flowers are placed one space apart they will produce a child in the empty space. Flowers cannot breed diagonally",
+        "Child flowers will grow after about 20 seconds",
+        "Child flowers will always consist of traits from each parent",
+        "You will need a larger empty space to do more complex breeding. Remove flowers from your inventory with 'Q'",
+        "Each flower has a stem that the three other parts are connected to",
+        "Don't confuse the leafs for petals. Flowers have many leafs connected to the stem but only one set of petals.",
+        "Leafs come in a lot of crazy shapes and sizes. Each flower has a formation of leafs depending on the stem shape",
+        "The pistil is found inside the petals. If you need a closer view use 'Control' to view the selected flower in your inventory",
+        "Plant the 4 flowers in a square shape so that each flower will breed with 2 others",
+        "If a parent has fewer black parts than its child, replace the parent with the child and continue breeding",
+        "Save time by replanting flowers and having a lot of flowers breed at the same time",
+        "The stem should look like a spring",
+        "The flower should look like it has mushrooms growing on the stem",
+        "The same techniques you used to breed an entirely black flower will work to breed the spring flower with the all black flower",
+        "Breeding a lot of flowers at once will speed up the process",
+        "challenge mode will task you with breeding exact flowers"
+    };
+
+    public int currentQuestId = 0;
+    public int flowersCollected = 0;
+    public int flowersPlaced = 0;
+
+    public uint challengeModeFlower;
+
+    //Completes the current quest and increments the ID
+    public void completeQuest()
+    {
+        enableTabText();
+
+        flowersCollected = 0;
+        flowersPlaced = 0;
+        setCurrentQuestId(currentQuestId + 1);
+    }
+
+    //Performs all the necessary actions to set the current quest ID to the given id
+    public void setCurrentQuestId(int inId)
+    {
+        currentQuestId = inId;
+
+        if (inId < questString.Length)
+        {
+            helpText.text = string.Format("{0}\n{1}", helpPrefix, helpQuestString[inId]);
+            objectiveText.text = string.Format("{0} ({1}/{2})\n{3}", objectivePrefix, inId + 1, questString.Length, questString[inId]);
+            challengeFlowerPanel.SetActive(false);
+        }
+        else
+        {
+            helpText.text = "";
+            objectiveText.text = "";
+        }
+
+        //If the quest is at the challenge flower then create one
+        if (currentQuestId == questString.Length)
+        {
+            //prep for challenge mode
+            newchallengeModeFlower();
+        }
+
+        //If the quest has gone past the first challenge flower
+        if (currentQuestId > 18)
+        {
+            //Go back to 17 so the player will have to push enter again
+            currentQuestId = 17;
+            //Shoot the confetti cannon
+            transform.Find("confettiCannon").gameObject.GetComponent<ParticleSystem>().Play();
+
+            //The text should say something about challenge mode
+            helpText.text = "Have fun breeding new flowers and decorating your planet!";
+            objectiveText.text = "Congratulations! Decorate your planet or press 'Enter' to try a new challenge flower!";
+            challengeFlowerPanel.SetActive(false);
+        }
+    }
+
+    //Spawns a random flower that the player must build
+    public void newchallengeModeFlower()
+    {
+        //Generate a number between 0-10 and then add it to the uint
+        uint randomFlower = 0;
+        int elementCount = flowerProperties.elementCount;
+        for (int ii = 0; ii < 8; ii += 1)
+        {
+            randomFlower += (uint)(Random.Range(0, elementCount));
+            randomFlower *= 16;
+        }
+        challengeModeFlower = randomFlower; //set challengeModeFlower to the random flower
+        instantiateChallengeModeFlower(challengeModeFlower);
+        Debug.Log("challenge flower is: " + challengeModeFlower);
+    }
+
+    //Instantiates a challenge mode flower from the given uint index and sets the slots
+    private void instantiateChallengeModeFlower(uint inIndex)
+    {
+        challengeFlowerPanel.SetActive(true);
+
+        //Force the canvas to update so the panels will be the right size
+        Canvas.ForceUpdateCanvases();
+
+        //Get the index for each element
+        int pistilIndex = flowerProperties.getPistilIndexFromIndex(inIndex);
+        int pistilColor = flowerProperties.getPistilColorIndexFromIndex(inIndex);
+        int petalIndex = flowerProperties.getPetalIndexFromIndex(inIndex);
+        int petalColor = flowerProperties.getPetalColorIndexFromIndex(inIndex);
+        int leafIndex = flowerProperties.getLeafIndexFromIndex(inIndex);
+        int leafColor = flowerProperties.getLeafColorIndexFromIndex(inIndex);
+        int stemIndex = flowerProperties.getStemIndexFromIndex(inIndex);
+        int stemColor = flowerProperties.getStemColorIndexFromIndex(inIndex);
+
+        Transform attributesTransform = challengeFlowerPanel.transform.GetChild(0);
+
+        //Set the slots to the correct flower
+        attributesTransform.GetChild(0).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .setIndex(ChallengeCheckerSlotController.MeshType.PISTIL, pistilIndex, pistilColor);
+
+        attributesTransform.GetChild(1).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .setIndex(ChallengeCheckerSlotController.MeshType.PETAL, petalIndex, petalColor);
+
+        attributesTransform.GetChild(2).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .setIndex(ChallengeCheckerSlotController.MeshType.LEAF, leafIndex, leafColor);
+
+        attributesTransform.GetChild(3).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .setIndex(ChallengeCheckerSlotController.MeshType.STEM, stemIndex, stemColor);
+
+        Transform showoffTransform = challengeFlowerPanel.transform.GetChild(1);
+        //Build the combined UI flower
+        if (showoffFlower != null)
+        {
+            GameObject.Destroy(showoffFlower);
+        }
+        showoffFlower = Instantiate(uiFlowerPrefab, showoffTransform);
+        showoffFlower.layer = LayerMask.NameToLayer("UI");
+        showoffFlower.transform.localScale = Vector3.one * uiFlowerScale * 2;
+        showoffFlower.GetComponent<UIFlowerScript>().buildFlower(stemIndex, leafIndex, petalIndex, pistilIndex);
+        showoffFlower.GetComponent<UIFlowerScript>().colorFlower(stemColor, leafColor, petalColor, pistilColor);
+        showoffFlower.GetComponent<UIFlowerScript>().rotationSpeed = .5f;
+
+        //Clear the slots so they aren't comparing
+        attributesTransform.GetChild(0).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .doNotCompareIndex();
+        attributesTransform.GetChild(1).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .doNotCompareIndex();
+        attributesTransform.GetChild(2).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .doNotCompareIndex();
+        attributesTransform.GetChild(3).gameObject.GetComponent<ChallengeCheckerSlotController>()
+            .doNotCompareIndex();
+    }
+
+    //Enables the tab text to alert the player that a new objective has appeared
+    private void enableTabText()
+    {
+        if (!showQuestPanel)
+        {
+            tabObject.SetActive(true);
+        }
+    }
+
+    #endregion
+}

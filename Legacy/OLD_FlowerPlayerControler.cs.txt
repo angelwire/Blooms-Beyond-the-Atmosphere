@@ -1,0 +1,551 @@
+﻿//created: 9-30-19
+//updated: 11-2-19
+//version: .03
+//author Vance Howald, William Jones
+//Flower placememnt script and inventory
+//TODO remove renaming flowers
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using System.Text.RegularExpressions;
+
+public class OLD_FlowerPlayerControler : MonoBehaviour
+{
+    public LayerMask placeableLayer; //flower colliders
+    public LayerMask world; //world colliders
+    public Canvas UIController;
+    public GameObject[] flowerInventoryModels = new GameObject[10]; //holder for the objects
+    public FlowerObj[] flowerObjsInvetory = new FlowerObj[10]; //holder for flower data
+    public int[] flowerInventoryCount = new int[10]; //holder for the count of flowers the player has
+    public int inventorySize = 10; //The size of the player's inventory (will be used to upgrade later in the game)
+    //The index that the character is selecting (with the mouse scroll)
+    public int selectedIndex = 0;
+    public GameObject selector;
+    public GameObject flowerSelector;
+    public Vector3 selectorBoxPos;
+    public Vector3 selectorBoxDimensions;
+    UIControllerScript uIControllerS;
+    string[] regexFilters = {
+        "...F....", //For case 6
+        ".F......", //For case 7
+        ".....F..", //For case 8
+        ".......F", //For case 9
+        ".F.F.F.F", //For case 11
+        "..5.....", //For case 13
+        "....7...", //For case 14
+        ".F5F.F.F", //For case 15
+        ".F5F7F.F"  //For case 16
+    };
+    Regex[] regexList;
+    char petalTypeForQuest;
+    List<uint> flowerMemory = new List<uint>();
+    bool[] partFinder = { false, false, false, false };
+    bool isFrozen = false;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        uIControllerS = UIController.GetComponent<UIControllerScript>();
+        regexList = new Regex[regexFilters.Length];
+        for (int i = 0; i < regexFilters.Length; i++)
+        {
+            regexList[i] = new Regex(regexFilters[i]);
+        }
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        isFrozen = uIControllerS.isViewingFlower || uIControllerS.isPaused;
+
+        if (Input.GetKeyDown(KeyCode.Mouse0) && !isFrozen)//left click
+        {
+            RaycastHit hit;
+            print("checking");
+            Ray ray = Camera.main.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+            if (Physics.Raycast(ray, out hit, 4.0f, placeableLayer, QueryTriggerInteraction.Collide))//check for flower
+            {
+                print("hit");
+                //string[] flowerGridPos = hit.transform.gameObject.name.Split(' ');//this should be changed
+                selectorBoxDimensions = hit.collider.bounds.size;
+                selectorBoxPos = hit.collider.bounds.center + hit.transform.position;
+                Placeable currentObj = hit.transform.gameObject.GetComponent<Placeable>();
+                if (currentObj != null)
+                {
+                    //This is stuff to test William's inventory UI
+                    /*uint hitIndex = WorldManager.instance.flowerGrid[int.Parse(flowerGridPos[0]), int.Parse(flowerGridPos[1])].getFlowerIndex();
+                    if ((long)hitIndex < 0)
+                    {
+                        print("WHOAH: " + (long)hitIndex);
+                    }*/
+                    bool foundHome = false;//start to find a slot to put it in
+                    if (uIControllerS.getInventoryData(selectedIndex) != null && currentObj.isEqual(uIControllerS.getInventoryData(selectedIndex)))//if there is an exact copy of the flower in inventory
+                    {
+                        uIControllerS.incInventoryCount(selectedIndex);
+                        foundHome = true;
+                    }
+                    for (int i = 0; i < 10 && !foundHome; i++)//try to find an exact copy of the flower in inventory to add it
+                    {
+                        if (uIControllerS.getInventoryData(i) != null && currentObj.isEqual(uIControllerS.getInventoryData(i)))
+                        {
+                            uIControllerS.incInventoryCount(i);
+                            foundHome = true;
+                            break;
+                        }
+                    }
+                    if (!foundHome && uIControllerS.getInventoryData(selectedIndex) == null)//is current slot empty
+                    {
+                        GameObject copy = GameObject.Instantiate(hit.transform.gameObject);
+                        uIControllerS.setSlot(selectedIndex, copy, copy.GetComponent<Placeable>(), 1);
+                        foundHome = true;
+                    }
+                    for (int i = 0; i < 10 && !foundHome; i++)//find any empty slot
+                    {
+                        if (uIControllerS.getInventoryData(i) == null)
+                        {
+                            GameObject copy = GameObject.Instantiate(hit.transform.gameObject);
+                            uIControllerS.setSlot(i, copy, copy.GetComponent<Placeable>(), 1);
+                            foundHome = true;
+                            break;
+                        }
+                    }
+                    if (foundHome)//if there's a hole
+                    {
+                        //questStuff(currentObj.id, int.Parse(flowerGridPos[0]), int.Parse(flowerGridPos[1]), false);
+                        currentObj.clearPos(0, 0);
+                        Destroy(hit.transform.gameObject);
+
+                        //WorldManager.instance.clearFlowerAt(int.Parse(flowerGridPos[0]), int.Parse(flowerGridPos[1]));
+                        //                    WorldManager.instance.flowerGrid[int.Parse(flowerGridPos[0]), int.Parse(flowerGridPos[1])].body = null;
+
+                    }
+                    else
+                    {
+                        uIControllerS.flashInventorySlots();
+                    }
+                }
+            }
+        }
+        if (Input.GetKeyDown(KeyCode.Mouse1) && !isFrozen) //right click
+        {
+            RaycastHit hit;
+            Ray ray = Camera.main.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+            if (Physics.Raycast(ray, out hit, 4.0f, world, QueryTriggerInteraction.Collide))
+            {
+                int[] flowerGridLoc = WorldManager.instance.worldPointToFlowerGrid(hit.point);//find what grid the point is in
+                print(flowerGridLoc[0] + " " + flowerGridLoc[1]);//keep this in, I can't figure out why some ghost flowers are still arround
+                if (flowerObjsInvetory[selectedIndex] != null && flowerInventoryCount[selectedIndex] > 0 && WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]].body == null)//do we have a flower, do we have enough (might not be needed), is there nothing there
+                {
+                    //print("droppin flower "+flowerGridLoc[0] + " " + flowerGridLoc[1]);
+                    flowerInventoryCount[selectedIndex]--;//one less flower
+                    uIControllerS.setSlotCount(selectedIndex, flowerInventoryCount[selectedIndex]);//update count
+                    float oldSpawnTime = WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]].timeToSpawn;
+                    WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]] = new FlowerObj(flowerObjsInvetory[selectedIndex]);//move the flower data over
+                    WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]].flowerGridPos = flowerGridLoc;
+                    WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]].timeToSpawn = oldSpawnTime;
+                    //This is to limit where in the cell the player can place the flower
+                    float chunkOverFlower = (float)WorldManager.instance.chunkWidth / WorldManager.instance.FlowerWidthPerChunk;
+                    Vector3 flowerCellCenterPosition = VectorUtilities.VectorAdd((VectorUtilities.VectorFloor(hit.point * chunkOverFlower) / chunkOverFlower), (chunkOverFlower * .5f));
+                    float maxDistance = (chunkOverFlower * .5f) * WorldManager.flowerMaxCenterDistance;
+                    Vector3 flowerDistanceFromCenter = VectorUtilities.VectorClamp(hit.point - flowerCellCenterPosition, -maxDistance, maxDistance);
+                    Vector3 flowerPlacementPosition = flowerCellCenterPosition + flowerDistanceFromCenter;
+                    //Now the flower can be placed at the flowerPlacementPosition
+
+                    GameObject newFlower = GameObject.Instantiate(flowerInventoryModels[selectedIndex], flowerPlacementPosition, Quaternion.identity, hit.transform);//make a copy
+                    newFlower.name = flowerGridLoc[0] + " " + flowerGridLoc[1];//placement stuff
+                    newFlower.transform.LookAt(transform.position);
+                    newFlower.transform.eulerAngles = new Vector3(0, newFlower.transform.eulerAngles.y, 0);
+                    newFlower.transform.Rotate(new Vector3(0, 90, 0));
+                    newFlower.SetActive(true);
+                    WorldManager.instance.flowerGrid[flowerGridLoc[0], flowerGridLoc[1]].giveBody(newFlower);//make sure data points to the new flower
+                    WorldManager.instance.RecalcAfterAdd(flowerGridLoc[0], flowerGridLoc[1]);//tell flower grid there's a new flower
+                    questStuff(flowerObjsInvetory[selectedIndex].getFlowerIndex(), flowerGridLoc[0], flowerGridLoc[1], true);
+                    if (flowerInventoryCount[selectedIndex] == 0)//is inventory empty
+                    {
+                        Destroy(flowerInventoryModels[selectedIndex]);//clean up
+                        flowerObjsInvetory[selectedIndex] = null;
+                        flowerInventoryModels[selectedIndex] = null;
+                        uIControllerS.setSlotIndex(selectedIndex, -1, flowerInventoryCount[selectedIndex]);
+                    }
+                }
+            }
+        }
+        //Control throwing away flowers with the "Q" key
+        if (Input.GetKeyDown(KeyCode.Q) && !isFrozen)
+        {
+            flowerInventoryCount[selectedIndex]--;//one less flower
+            uIControllerS.setSlotCount(selectedIndex, flowerInventoryCount[selectedIndex]);
+            if (flowerInventoryCount[selectedIndex] == 0)
+            {
+                Destroy(flowerInventoryModels[selectedIndex]);//clean up
+                flowerObjsInvetory[selectedIndex] = null;
+                flowerInventoryModels[selectedIndex] = null;
+                uIControllerS.setSlotIndex(selectedIndex, -1, flowerInventoryCount[selectedIndex]);
+            }
+        }
+
+        //Control mouse scrolling to select the index
+        if (Input.GetAxis("Mouse ScrollWheel") < 0f) //Scroll down
+        {
+            selectedIndex += 1;
+            if (selectedIndex >= inventorySize)
+            {
+                selectedIndex -= inventorySize;
+            }
+            //Tell the UIController to update the selected index
+            uIControllerS.updateSelectedSlot(selectedIndex);
+        }
+        if (Input.GetAxis("Mouse ScrollWheel") > 0f) //Scroll up
+        {
+            selectedIndex -= 1;
+            if (selectedIndex < 0)
+            {
+                selectedIndex += inventorySize;
+            }
+            //Tell the UIController to update the selected index
+            uIControllerS.updateSelectedSlot(selectedIndex);
+        }
+        //Control keyboard pressing to select the index
+        //Loop through 0-9
+        for (int ii = 0; ii < 10; ii += 1)
+        {
+            //If the number is pressed
+            if (Input.GetKey("" + ii))
+            {
+                //Convert 0 to 9 so 0 will select the last slot
+                //This is to make the UI match the keyboard
+                selectedIndex = ii - 1;
+                if (selectedIndex < 0)
+                {
+                    selectedIndex += inventorySize;
+                }
+                //Tell the UIController to update the selected index
+                uIControllerS.updateSelectedSlot(selectedIndex);
+            }
+        }
+
+        RaycastHit hitGrid;
+        Ray rayGrid = Camera.main.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+        if (Physics.Raycast(rayGrid, out hitGrid, 4.0f, world, QueryTriggerInteraction.Collide))
+        {
+            if (!selector.activeSelf)
+            {
+                selector.SetActive(true);
+            }
+            selector.transform.position = WorldManager.instance.worldPointToGridOrgin(hitGrid.point);
+        }
+        else if (selector.activeSelf)
+        {
+            selector.SetActive(false);
+        }
+        Ray rayFlower = Camera.main.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+        if (Physics.Raycast(rayFlower, out hitGrid, 4.0f, placeableLayer, QueryTriggerInteraction.Collide))//check for flower
+        {
+            if (!flowerSelector.activeSelf)
+            {
+                flowerSelector.SetActive(true);
+            }
+            flowerSelector.transform.position = new Vector3(hitGrid.transform.position.x, hitGrid.transform.position.y + (hitGrid.collider.bounds.size.y / 2), hitGrid.transform.position.z);
+            flowerSelector.transform.localScale = hitGrid.collider.bounds.size;
+        }
+        else if (flowerSelector.activeSelf)
+        {
+            flowerSelector.SetActive(false);
+        }
+        if (Input.GetKeyDown(KeyCode.Return))
+        {
+            if (uIControllerS.currentQuestId == 4 || uIControllerS.currentQuestId == 12 || uIControllerS.currentQuestId == 17)
+            {
+                uIControllerS.completeQuest();
+            }
+        }
+    }
+
+
+    void questStuff(uint hitIndex, int x, int y, bool wasPlaced)//manages all the quests
+    {
+        switch (uIControllerS.currentQuestId)
+        {
+            case 0: //Clear flowers to create an empty 4x4 area
+                for (int yOffset = 0; yOffset < 4; yOffset++)//top left corner for 4x4 area then move -x and -y (it says plus but it is subtracted later)
+                {
+                    for (int xOffset = 0; xOffset < 4; xOffset++)
+                    {
+                        bool passed = true;
+                        for (int currentY = 0; currentY < 4; currentY++)//check a 4x4 area starting from the currently cleared flower and work +x +y
+                        {
+                            for (int currentX = 0; currentX < 4; currentX++)
+                            {
+                                if (WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + currentX - xOffset), WorldManager.instance.trueY(y + currentY - yOffset)].body != null)
+                                {
+                                    passed = false;
+                                    currentY = 10;
+                                    break;
+                                }
+                            }
+                        }
+                        if (passed)
+                        {
+                            uIControllerS.completeQuest();
+                            yOffset = 10;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case 1://Find and collect 2 flowers with the same petal type
+                if (wasPlaced)
+                {
+                    break;
+                }
+                char currentFlowerPetal = hitIndex.ToString("X8")[0];//figure out the current petal
+                bool found = false;
+                for (int i = 0; i < flowerMemory.Count; i++)//flowermemory is every flower collected after the grid was cleared
+                {
+                    if (flowerMemory[i].ToString("X8")[0] == currentFlowerPetal)//if the flower in memory also has the petal
+                    {
+
+                        for (int ii = 0; ii < 10; ii++)//make sure the flower is still in inventory
+                        {
+                            if (flowerObjsInvetory[ii] != null && flowerObjsInvetory[ii].getFlowerIndex() == flowerMemory[i])
+                            {
+                                petalTypeForQuest = currentFlowerPetal;
+                                uIControllerS.completeQuest();
+                                found = true;
+                                i = 1000000;
+                                break;
+                            }
+                        }
+                    }
+                }
+                flowerMemory.Add(hitIndex);//add it once we done
+                if (found)
+                {
+                    flowerMemory.Clear();
+                }
+                break;
+            case 2://Place the 2 flowers in the clearing to breed them together
+                if (!wasPlaced)
+                {
+                    break;
+                }
+                if (petalTypeForQuest == hitIndex.ToString("X8")[0])//is the flower the same petal type as what you picked for the quest
+                {
+                    flowerMemory.Add(hitIndex);
+                    for (int yOffset = -2; yOffset <= 2; yOffset += 2)//checks the current pos and looks for flowers that were planted 2 tiles away with nothing inbetween the two
+                    {
+                        for (int xOffset = -2; xOffset <= 2; xOffset += 2)
+                        {
+                            if (yOffset + xOffset == -2 || yOffset + xOffset == 2)
+                            {
+                                if (flowerMemory.Contains(WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + xOffset), WorldManager.instance.trueY(y + yOffset)].getFlowerIndex()))
+                                {
+                                    int newX = xOffset / 2;
+                                    int newY = yOffset / 2;
+                                    if (WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + newX), WorldManager.instance.trueY(y + newY)].body == null)
+                                    {
+                                        uIControllerS.completeQuest();
+                                        yOffset = 10;
+                                        flowerMemory.Clear();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            case 3: //Wait for a child flower to grow in the empty space and collect it
+                if (wasPlaced)
+                {
+                    break;
+                }
+                bool isDone = false;
+                if (petalTypeForQuest == hitIndex.ToString("X8")[0])//what the flower collected in the spawn spot and did it have the right petal
+                {
+                    if (WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + 1), WorldManager.instance.trueY(y + 0)].petalIndex[0] == WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x - 1), WorldManager.instance.trueY(y + 0)].petalIndex[0] && petalTypeForQuest == WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x - 1), WorldManager.instance.trueY(y + 0)].getFlowerIndex().ToString("X8")[0])
+                    {
+                        isDone = true;
+                    }
+                    else if (WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + 0), WorldManager.instance.trueY(y + 1)].petalIndex[0] == WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + 0), WorldManager.instance.trueY(y - 1)].petalIndex[0] && petalTypeForQuest == WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + 0), WorldManager.instance.trueY(y - 1)].getFlowerIndex().ToString("X8")[0])
+                    {
+                        isDone = true;
+                    }
+                }
+                if (isDone)
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 4://Congratulations! Press 'Enter' to continue the objectives
+                //completed elsewhere
+                break;
+            case 5://Clear flowers to create an empty 8X8 area
+                for (int yOffset = 0; yOffset < 8; yOffset++)//same idea as case 0
+                {
+                    for (int xOffset = 0; xOffset < 8; xOffset++)
+                    {
+                        bool passed = true;
+                        for (int currentY = 0; currentY < 8; currentY++)
+                        {
+                            for (int currentX = 0; currentX < 8; currentX++)
+                            {
+                                if (WorldManager.instance.flowerGrid[WorldManager.instance.trueX(x + currentX - xOffset), WorldManager.instance.trueY(y + currentY - yOffset)].body != null)
+                                {
+                                    passed = false;
+                                    currentY = 10;
+                                    break;
+                                }
+                            }
+                        }
+                        if (passed)
+                        {
+                            uIControllerS.completeQuest();
+                            yOffset = 10;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case 6://Collect a flower that has a black stem
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[0].IsMatch(hitIndex.ToString("X8")))//does it match a regex expression for black stem
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 7://Collect a flower that has black petals
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[1].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 8://Collect a flower that has black leafs
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[2].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 9://Collect a flower that has a black pistil
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[3].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 10://Return to the large clearing and plant the 4 flowers so they will breed children
+                if (!wasPlaced)
+                {
+                    break;
+                }
+                for (int i = 0; i < 4; i++)//does flower match one of the black checks
+                {
+                    if (regexList[i].IsMatch(hitIndex.ToString("X8")))
+                    {
+                        partFinder[i] = true;
+                        if (!flowerMemory.Contains(hitIndex))//has flower been placed before
+                        {
+                            flowerMemory.Add(hitIndex);
+                        }
+                    }
+                }
+                if (flowerMemory.Count >= 4)//have 4 flowers been placed
+                {
+                    for (int i = 0; i < 4; i++)//have they satsified requirement for each part to be filled
+                    {
+                        if (partFinder[i] == false)
+                        {
+                            break;
+                        }
+                        if (i == 3)
+                        {
+                            uIControllerS.completeQuest();
+                            flowerMemory.Clear();
+                        }
+                    }
+                }
+                break;
+            case 11://Breed a flower that is entirely blackz    
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[4].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 12://Congratulations! Press 'Enter' to continue the objectives
+                //completed elesewhere
+                break;
+            case 13://Collect a flower that has a curly spring stem
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[5].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 14://Collect a flower that has mushroom type leaves
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[6].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 15://Breed an all black flower with a curly spring stem
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[7].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 16://Breed an all black flower to have both the curly spring stem and mushroom type leaf
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (regexList[8].IsMatch(hitIndex.ToString("X8")))
+                {
+                    uIControllerS.completeQuest();
+                }
+                break;
+            case 17://Congratulations! Press 'Enter' to exit the tutorial and start challenge mode
+                //completed elesewhere
+                break;
+            default: //TODO
+                if (wasPlaced)
+                {
+                    break;
+                }
+                if (hitIndex == uIControllerS.challengeModeFlower)
+                {
+                    //uIControllerS.newchallengeModeFlower();
+                    uIControllerS.completeQuest();
+                }
+                break;
+        }
+    }
+}

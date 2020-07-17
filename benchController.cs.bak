@@ -1,0 +1,155 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class benchController : Placeable
+{
+    GameObject promptObject;
+    float hoveringAmount = 0;
+    private bool isHovered = false; //Use the setHover method
+    float hoverSpeed = 10;
+    int[] flowerPos2 = { };
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        id = 0;
+        promptObject = transform.GetChild(0).gameObject;
+        promptObject.SetActive(false);
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (isHovered)
+        {
+            promptObject.transform.rotation = Quaternion.identity * Camera.main.transform.rotation;
+        }
+
+        hoveringAmount = Mathf.Lerp(hoveringAmount, (isHovered ? 1 : 0), hoverSpeed * Time.deltaTime);
+        GetComponent<MeshRenderer>().material.SetFloat("_HoveringValue", hoveringAmount);
+
+        //If the player is looking at the bench
+        if (isHovered)
+        {
+            if (Input.GetKeyDown(KeyCode.E))
+            {
+                GameObject player = GameObject.Find("FPSController");
+                if (player!=null)
+                {
+                    player.GetComponent<UnityStandardAssets.Characters.FirstPerson.FirstPersonController>().sit(gameObject);
+                }
+            }
+        }
+
+
+        //Test just to see if hovering works
+        if (Input.GetKey(KeyCode.Y)) { setHover(true); }
+        else { setHover(false); }
+    }
+
+    //Sets the hover bool
+    public void setHover(bool hover)
+    {
+        if (hover!=isHovered)
+        {
+            isHovered = hover;
+            promptObject.SetActive(isHovered);
+        }
+    }
+
+    public override bool canBePlaced(RaycastHit hit)
+    {
+        int yRot = (int)((Camera.main.transform.parent.eulerAngles.y + 225) / 90);
+        int[] flowerGridLoc = WorldManager.instance.worldPointToFlowerGrid(hit.point);//find what grid the point is in
+        float chunkOverFlower = (float)WorldManager.instance.chunkWidth / WorldManager.instance.FlowerWidthPerChunk;
+        Vector3 flowerCellCenterPosition = VectorUtilities.VectorAdd((VectorUtilities.VectorFloor(hit.point * chunkOverFlower) / chunkOverFlower), (chunkOverFlower * .5f));
+        int x2 = flowerGridLoc[0];
+        int y2 = flowerGridLoc[1];
+        Vector3 distanceFromCenter=hit.point - flowerCellCenterPosition;
+        if (yRot % 2 == 0)
+        {
+            if (distanceFromCenter.x > 0)
+            {
+                x2++;
+            }
+            else
+            {
+                x2--;
+            }
+        }
+        else
+        {
+            if (distanceFromCenter.z > 0)
+            {
+                y2++;
+            }
+            else
+            {
+                y2--;
+            }
+        }
+        return WorldManager.instance.placableGrid[flowerGridLoc[0], flowerGridLoc[1]] == null && WorldManager.instance.placableGrid[x2, y2] == null;
+    }
+
+    public override string save()
+    {
+        throw new System.NotImplementedException();
+    }
+
+    public override Vector3 posClamp(RaycastHit hit)
+    {
+        int yRot = (int)((Camera.main.transform.parent.eulerAngles.y + 225) / 90);
+        int[] flowerGridLoc = WorldManager.instance.worldPointToFlowerGrid(hit.point);//find what grid the point is in
+        float chunkOverFlower = (float)WorldManager.instance.chunkWidth / WorldManager.instance.FlowerWidthPerChunk;
+        Vector3 flowerCellCenterPosition = VectorUtilities.VectorAdd((VectorUtilities.VectorFloor(hit.point * chunkOverFlower) / chunkOverFlower), (chunkOverFlower * .5f));
+        int x2 = flowerGridLoc[0];
+        int y2 = flowerGridLoc[1];
+        Vector3 distanceFromCenter = hit.point - flowerCellCenterPosition;
+        if (yRot % 2 == 0)
+        {
+            if (distanceFromCenter.x > 0)
+            {
+                flowerCellCenterPosition += Vector3.right * 0.5f;
+            }
+            else
+            {
+                flowerCellCenterPosition -= Vector3.right * 0.5f;
+            }
+        }
+        else
+        {
+            if (distanceFromCenter.z > 0)
+            {
+                flowerCellCenterPosition += Vector3.forward * 0.5f;
+            }
+            else
+            {
+                flowerCellCenterPosition -= Vector3.forward* 0.5f;
+            }
+        }
+        flowerCellCenterPosition.y = 0;
+        return flowerCellCenterPosition;
+    }
+
+    public override void cloneObj(GameObject model, Placeable data, RaycastHit hit)
+    {
+
+            GameObject newFlower = GameObject.Instantiate(model, posClamp(hit), Quaternion.identity, hit.transform);//make a copy
+            //newFlower.name = x + " " + y;//placement stuff
+            newFlower.transform.LookAt(transform.position);
+            int yRot = (int)((Camera.main.transform.parent.eulerAngles.y + 225) / 90);
+            newFlower.transform.eulerAngles = new Vector3(0, yRot*90, 0);
+            //        newFlower.transform.Rotate(new Vector3(0, 90, 0));
+            newFlower.SetActive(true);
+            newFlower.transform.localScale = Vector3.one;
+
+            PathDecorationController currentFlowerObj = newFlower.GetComponent<PathDecorationController>();
+            //WorldManager.instance.placableGrid[x, y] = currentFlowerObj;//move the flower data over
+        }
+
+    public override void clearPos()
+    {
+        //throw new System.NotImplementedException();
+    }
+}

@@ -1,0 +1,43 @@
+﻿using UnityEngine;
+
+public abstract class Placeable : MonoBehaviour
+{
+    public bool isFlower;
+    public bool growable;
+    public float uiScale;
+    public uint id;
+    public int[] flowerGridPos = { 0, 0 };
+
+    public abstract Vector3 posClamp(RaycastHit hit);
+    public abstract void cloneObj(GameObject model, Placeable data, RaycastHit hit);
+    public abstract string save();
+    public abstract bool canBePlaced(RaycastHit hit);
+
+    public abstract void clearPos();
+
+    public bool isEqual(Placeable other)
+    {
+        return isFlower == other.isFlower && id == other.id;
+    }
+
+    public bool isOnGameObject()//untiy throws an error if the script isn't on a gameobject and you check gameobject == null, idk why
+    {
+        try
+        {
+            if (gameObject != null)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+        return false;
+    }
+
+    public bool isLivingFlower()
+    {
+        return isFlower && isOnGameObject();
+    }
+}
